@@ -1,0 +1,49 @@
+# This file ignores local runtime artifacts, caches, and large training outputs for OSEDiff_refldm.
+
+# Python bytecode and cache directories.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local virtual environments and Python tooling caches.
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editor and OS metadata.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Training, validation, and inference outputs.
+experience/
+outputs/
+results/
+logs/
+runs/
+
+# TensorBoard and tracker artifacts that may be written under custom output roots.
+events.out.tfevents.*
+
+# Validation image dumps and metric summaries if created outside ignored output roots.
+eval/
+metrics/
+
+# Checkpoints, exported weights, and large binary artifacts generated during experiments.
+checkpoints/
+*.ckpt
+*.pth
+*.pt
+*.bin
+*.safetensors
+*.onnx
+
+# Temporary files and local debug leftovers.
+*.tmp
+*.temp
+*.swp
+*.swo
