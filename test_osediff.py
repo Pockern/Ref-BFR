@@ -28,9 +28,27 @@ def parse_args():
     return parser.parse_args()
 
 
+def resolve_image_path(image_path):
+    """Resolve dataset-specific filename aliases before opening the image."""
+    image_path = str(image_path)
+
+    # Match Ref-LDM's CelebA-HQ compatibility: 00022.png -> 22.jpg when present.
+    if image_path.endswith(".png"):
+        base_name = os.path.basename(image_path)[:-4]
+        try:
+            numeric_name = int(base_name)
+            jpg_path = os.path.join(os.path.dirname(image_path), f"{numeric_name}.jpg")
+            if os.path.exists(jpg_path):
+                return jpg_path
+        except ValueError:
+            pass
+
+    return image_path
+
+
 def read_and_normalize_image(image_path, resize):
     """Read an RGB image, resize it, and normalize it to [-1, 1]."""
-    image = Image.open(str(image_path)).convert("RGB")
+    image = Image.open(resolve_image_path(image_path)).convert("RGB")
     if resize is not None and image.size != tuple(resize):
         image = image.resize(tuple(resize))
     return pil_to_tensor(image) / 127.5 - 1.0

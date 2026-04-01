@@ -1,0 +1,136 @@
+# This config mirrors the main training setup but uses short intervals to debug the full train/val/checkpoint flow.
+
+output_dir: experience/osediff_refldm_face_debug
+tracker_root: tb_logs
+logging_dir: logs
+tracker_project_name: train_osediff_refldm_face_debug
+report_to: tensorboard
+seed: 123
+resume_path: ""
+
+model_config_path: configs/refldm.yaml
+model_ckpt_path: /mnt/data/shenglong/project/checkpoints/refldm.ckpt
+student_init_ckpt_path: /mnt/data/shenglong/project/checkpoints/refldm.ckpt
+vae_ckpt_path: /mnt/data/shenglong/project/checkpoints/vqgan.ckpt
+identity_model_path: /mnt/data/shenglong/project/checkpoints/pretrained/insightface_webface_r50.onnx
+
+train_batch_size: 2
+num_training_epochs: 10000
+max_train_steps: 1000
+checkpointing_steps: 4
+log_steps: 1
+gradient_accumulation_steps: 1
+dataloader_num_workers: 0
+
+learning_rate: 5.0e-05
+lr_scheduler: constant
+lr_warmup_steps: 500
+lr_num_cycles: 1
+lr_power: 1.0
+
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.01
+adam_epsilon: 1.0e-08
+max_grad_norm: 1.0
+mixed_precision: fp16
+allow_tf32: false
+enable_xformers_memory_efficient_attention: false
+set_grads_to_none: true
+
+lambda_l2: 1.0
+lambda_lpips: 2.0
+lambda_id: 1.0
+lambda_vsd: 1.0
+lambda_vsd_lora: 1.0
+
+teacher_ddim_steps: 100
+student_timestep: 999
+cfg_scale: 1.5
+print_teacher_progress: false
+
+file_list: /mnt/data/shenglong/project/datasets/FFHQ-Ref/reference_mapping/train_references.csv
+gt_dir: /mnt/data/shenglong/project/datasets/ffhq-dataset/images512x512
+lq_dir: ""
+ref_dir: /mnt/data/shenglong/project/datasets/ffhq-dataset/images512x512
+semantic_dir: ""
+
+use_given_lq: false
+use_given_ref: true
+max_num_refs: 5
+dup_to_max_num_refs: true
+cat_refs_axis: width
+ref_rand_aug: true
+shuffle_refs_prob: 1.0
+lr_flip_aug: true
+image_size: [512, 512]
+
+degrad_opt:
+  blur_kernel_list: [iso, aniso]
+  blur_kernel_prob: [0.5, 0.5]
+  blur_kernel_size: 41
+  blur_sigma: [0, 16]
+  downsample_range: [1, 32]
+  noise_range: [0, 20]
+  jpeg_range: [30, 100]
+
+validation:
+  enabled: true
+  every_n_steps: 4
+  batch_size: 1
+  num_workers: 0
+  max_batches: null
+  save_images: true
+  seed: 123
+  summary_filename: validation_summary.csv
+
+  metrics:
+    ids:
+      enabled: true
+      model_path: /mnt/data/shenglong/project/ref-ldm/pretrained/buffalo_l/w600k_r50.onnx
+    lpips:
+      enabled: true
+    psnr:
+      enabled: true
+    ssim:
+      enabled: true
+    niqe:
+      enabled: false
+    musiq:
+      enabled: false
+    fid:
+      enabled: false
+
+  datasets:
+    ffhq_ref_moderate:
+      enabled: true
+      num_images: 10
+      file_list: /mnt/data/shenglong/project/datasets/FFHQ-Ref/reference_mapping/test_references.csv
+      gt_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/images
+      lq_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/test_images/moderate_degrad
+      ref_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/images
+      use_given_lq: true
+      fid_kwargs:
+        dataset_name: FFHQ
+        dataset_res: 512
+        dataset_split: trainval70k
+    ffhq_ref_severe:
+      enabled: true
+      num_images: 10
+      file_list: /mnt/data/shenglong/project/datasets/FFHQ-Ref/reference_mapping/test_references.csv
+      gt_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/images
+      lq_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/test_images/severe_degrad
+      ref_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/images
+      use_given_lq: true
+      fid_kwargs:
+        dataset_name: FFHQ
+        dataset_res: 512
+        dataset_split: trainval70k
+    celeba_test_ref:
+      enabled: true
+      num_images: 10
+      file_list: /mnt/data/shenglong/project/datasets/CelebA-Test-Ref/test_references.csv
+      gt_dir: /mnt/data/shenglong/project/datasets/CelebA-Test-Ref/celeba_test_images/hq
+      lq_dir: /mnt/data/shenglong/project/datasets/CelebA-Test-Ref/celeba_test_images/lq
+      ref_dir: /mnt/data/shenglong/project/datasets/ffhq-dataset/images512x512
+      use_given_lq: true

@@ -19,7 +19,6 @@ This file documents the copied OSEDiff_refldm project and its Ref-LDM-specific e
 
 ## Notes
 
-- `configs/refldm_teacher.yaml` is copied from the original Ref-LDM config and remains the source of model structure truth.
+- `configs/refldm.yaml` is copied from the original Ref-LDM config and remains the source of model structure truth.
 - The generated student checkpoints are self-contained `.pkl` files saved under the configured `output_dir/checkpoints/`.
 - The vendored Ref-LDM code lives under `refldm/`.
-

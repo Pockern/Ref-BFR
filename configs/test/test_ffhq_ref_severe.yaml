@@ -1,11 +1,11 @@
-# This config runs batch inference on the FFHQ-Ref moderate degradation test set.
+# This config runs batch inference on the FFHQ-Ref severe degradation test set.
 
-output_dir: outputs/ffhq_ref_moderate_step100_cfg15_uniform
+output_dir: outputs/ffhq_ref_severe_step100_cfg15_uniform
 output_name: result.png
 input_mode: dataset_csv # single or dataset_csv
 
-teacher_config_path: configs/refldm_teacher.yaml
-teacher_ckpt_path: /mnt/data/shenglong/project/checkpoints/refldm.ckpt
+model_config_path: configs/refldm.yaml
+model_ckpt_path: /mnt/data/shenglong/project/checkpoints/refldm.ckpt
 vae_ckpt_path: /mnt/data/shenglong/project/checkpoints/vqgan.ckpt
 osediff_path: ""
 inference_mode: ddim_multi_step # one_step or ddim_multi_step
@@ -23,7 +23,7 @@ reference_images:
   - /mnt/data/shenglong/project/ref-ldm/assets/demo/ref3.png
 
 test_file_list: /mnt/data/shenglong/project/datasets/FFHQ-Ref/reference_mapping/test_references.csv
-test_lq_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/test_images/moderate_degrad
+test_lq_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/test_images/severe_degrad
 test_ref_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/images
 
 image_size: [512, 512]

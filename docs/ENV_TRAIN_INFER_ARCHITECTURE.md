@@ -23,7 +23,7 @@ Main config files:
 
 - `configs/train_refldm_face.yaml`
 - `configs/test_refldm_face.yaml`
-- `configs/refldm_teacher.yaml`
+- `configs/refldm.yaml`
 
 ## 2. Directory Layout
 
@@ -428,4 +428,3 @@ python test_osediff.py --config configs/test_refldm_face.yaml
 cd /mnt/data/shenglong/project/OSEDiff_refldm
 python test_inference_time.py --config configs/test_refldm_face.yaml
 ```
-

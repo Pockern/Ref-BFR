@@ -1,20 +1,24 @@
-# This config mirrors the main training setup but uses short intervals to debug the full train/val/checkpoint flow.
+# This config keeps the copied OSEDiff training settings while adding optional validation controls.
 
-output_dir: experience/osediff_refldm_face_debug
+output_dir: experience/osediff_refldm_face
+tracker_root: tb_logs
 logging_dir: logs
-tracker_project_name: train_osediff_refldm_face_debug
+tracker_project_name: train_osediff_refldm_face
 report_to: tensorboard
 seed: 123
+resume_path: ""
 
-teacher_config_path: configs/refldm_teacher.yaml
-teacher_ckpt_path: /mnt/data/shenglong/project/checkpoints/refldm.ckpt
+model_config_path: configs/refldm.yaml
+model_ckpt_path: /mnt/data/shenglong/project/checkpoints/refldm.ckpt
 student_init_ckpt_path: /mnt/data/shenglong/project/checkpoints/refldm.ckpt
 vae_ckpt_path: /mnt/data/shenglong/project/checkpoints/vqgan.ckpt
+identity_model_path: /mnt/data/shenglong/project/checkpoints/insightface_webface_r50.onnx
 
 train_batch_size: 1
 num_training_epochs: 10000
-max_train_steps: 6
-checkpointing_steps: 2
+max_train_steps: 100000
+checkpointing_steps: 500
+log_steps: 50
 gradient_accumulation_steps: 1
 dataloader_num_workers: 0
 
@@ -36,6 +40,7 @@ set_grads_to_none: false
 
 lambda_l2: 1.0
 lambda_lpips: 2.0
+lambda_id: 1.0
 lambda_vsd: 1.0
 lambda_vsd_lora: 1.0
 
@@ -70,11 +75,11 @@ degrad_opt:
   jpeg_range: [30, 100]
 
 validation:
-  enabled: true
-  every_n_steps: 2
+  enabled: false
+  every_n_steps: 500
   batch_size: 1
   num_workers: 0
-  max_batches: 2
+  max_batches: null
   save_images: true
   seed: 123
   summary_filename: validation_summary.csv
@@ -99,6 +104,7 @@ validation:
   datasets:
     ffhq_ref_moderate:
       enabled: true
+      num_images: null
       file_list: /mnt/data/shenglong/project/datasets/FFHQ-Ref/reference_mapping/test_references.csv
       gt_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/images
       lq_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/test_images/moderate_degrad
@@ -110,6 +116,7 @@ validation:
         dataset_split: trainval70k
     ffhq_ref_severe:
       enabled: true
+      num_images: null
       file_list: /mnt/data/shenglong/project/datasets/FFHQ-Ref/reference_mapping/test_references.csv
       gt_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/images
       lq_dir: /mnt/data/shenglong/project/datasets/FFHQ-Ref/test_images/severe_degrad
@@ -121,6 +128,7 @@ validation:
         dataset_split: trainval70k
     celeba_test_ref:
       enabled: true
+      num_images: null
       file_list: /mnt/data/shenglong/project/datasets/CelebA-Test-Ref/test_references.csv
       gt_dir: /mnt/data/shenglong/project/datasets/CelebA-Test-Ref/celeba_test_images/hq
       lq_dir: /mnt/data/shenglong/project/datasets/CelebA-Test-Ref/celeba_test_images/lq

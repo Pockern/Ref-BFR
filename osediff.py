@@ -19,12 +19,12 @@ from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.util import instantiate_from_config
 
 
-def _build_refldm_model(config_path, teacher_ckpt_path, vae_ckpt_path, device, trainable):
+def _build_refldm_model(config_path, model_ckpt_path, vae_ckpt_path, device, trainable):
     """Instantiate a Ref-LDM model and load the requested checkpoints.
 
     Args:
         config_path: Path to the Ref-LDM YAML config.
-        teacher_ckpt_path: Path to the source Ref-LDM checkpoint.
+        model_ckpt_path: Path to the source Ref-LDM checkpoint.
         vae_ckpt_path: Path to the VQ/VAE checkpoint.
         device: Target device for the created model.
         trainable: Whether the diffusion backbone should be trainable.
@@ -39,7 +39,7 @@ def _build_refldm_model(config_path, teacher_ckpt_path, vae_ckpt_path, device, t
         model_config["model"]["params"].pop(key, None)
 
     model = instantiate_from_config(model_config["model"])
-    state_dict = torch.load(teacher_ckpt_path, map_location="cpu")
+    state_dict = torch.load(model_ckpt_path, map_location="cpu")
     if "state_dict" in state_dict:
         state_dict = state_dict["state_dict"]
     model.load_state_dict(state_dict, strict=False)
@@ -102,13 +102,15 @@ class RefLDMOneStepMixin:
 class OSEDiff_gen(nn.Module, RefLDMOneStepMixin):
     """Generator wrapper that preserves the OSEDiff role with a Ref-LDM student."""
 
-    def __init__(self, args):
+    def __init__(self, args, device=None):
         super().__init__()
         self.args = args
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Use the process-local device provided by the trainer so multi-process launch
+        # does not eagerly place every student model copy onto cuda:0.
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.student_model = _build_refldm_model(
-            config_path=args.teacher_config_path,
-            teacher_ckpt_path=args.student_init_ckpt_path or args.teacher_ckpt_path,
+            config_path=args.model_config_path,
+            model_ckpt_path=args.student_init_ckpt_path or args.model_ckpt_path,
             vae_ckpt_path=args.vae_ckpt_path,
             device=self.device,
             trainable=True,
@@ -158,8 +160,8 @@ class OSEDiff_gen(nn.Module, RefLDMOneStepMixin):
         """Persist the student checkpoint in a single self-contained file."""
         payload = {
             "state_dict": self.student_model.state_dict(),
-            "teacher_config_path": self.args.teacher_config_path,
-            "teacher_ckpt_path": self.args.teacher_ckpt_path,
+            "model_config_path": self.args.model_config_path,
+            "model_ckpt_path": self.args.model_ckpt_path,
             "vae_ckpt_path": self.args.vae_ckpt_path,
             "student_timestep": self.args.student_timestep,
         }
@@ -174,8 +176,8 @@ class OSEDiff_reg(nn.Module, RefLDMOneStepMixin):
         self.args = args
         self.device = accelerator.device
         self.teacher_model = _build_refldm_model(
-            config_path=args.teacher_config_path,
-            teacher_ckpt_path=args.teacher_ckpt_path,
+            config_path=args.model_config_path,
+            model_ckpt_path=args.model_ckpt_path,
             vae_ckpt_path=args.vae_ckpt_path,
             device=self.device,
             trainable=False,
@@ -184,8 +186,8 @@ class OSEDiff_reg(nn.Module, RefLDMOneStepMixin):
             self.teacher_model, print_tqdm=getattr(args, "print_teacher_progress", False)
         )
         self.reg_model = _build_refldm_model(
-            config_path=args.teacher_config_path,
-            teacher_ckpt_path=args.student_init_ckpt_path or args.teacher_ckpt_path,
+            config_path=args.model_config_path,
+            model_ckpt_path=args.student_init_ckpt_path or args.model_ckpt_path,
             vae_ckpt_path=args.vae_ckpt_path,
             device=self.device,
             trainable=True,
@@ -254,13 +256,13 @@ class OSEDiff_test(nn.Module, RefLDMOneStepMixin):
         checkpoint = None
         if checkpoint_path and os.path.isfile(checkpoint_path):
             checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        config_path = checkpoint.get("teacher_config_path", args.teacher_config_path) if checkpoint else args.teacher_config_path
-        teacher_ckpt_path = checkpoint.get("teacher_ckpt_path", args.teacher_ckpt_path) if checkpoint else args.teacher_ckpt_path
+        config_path = checkpoint.get("model_config_path", args.model_config_path) if checkpoint else args.model_config_path
+        model_ckpt_path = checkpoint.get("model_ckpt_path", args.model_ckpt_path) if checkpoint else args.model_ckpt_path
         vae_ckpt_path = checkpoint.get("vae_ckpt_path", args.vae_ckpt_path) if checkpoint else args.vae_ckpt_path
         self.student_timestep = checkpoint.get("student_timestep", args.student_timestep) if checkpoint else args.student_timestep
         self.student_model = _build_refldm_model(
             config_path=config_path,
-            teacher_ckpt_path=teacher_ckpt_path,
+            model_ckpt_path=model_ckpt_path,
             vae_ckpt_path=vae_ckpt_path,
             device=self.device,
             trainable=False,

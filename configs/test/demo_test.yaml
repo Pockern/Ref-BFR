@@ -4,8 +4,8 @@ output_dir: outputs
 output_name: result.png
 input_mode: single # single or dataset_csv
 
-teacher_config_path: configs/refldm_teacher.yaml
-teacher_ckpt_path: /mnt/data/shenglong/project/checkpoints/refldm.ckpt
+model_config_path: configs/refldm.yaml
+model_ckpt_path: /mnt/data/shenglong/project/checkpoints/refldm.ckpt
 vae_ckpt_path: /mnt/data/shenglong/project/checkpoints/vqgan.ckpt
 osediff_path: ""
 inference_mode: ddim_multi_step # one_step or ddim_multi_step

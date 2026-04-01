@@ -25,6 +25,7 @@ outputs/
 results/
 logs/
 runs/
+tb_logs/
 
 # TensorBoard and tracker artifacts that may be written under custom output roots.
 events.out.tfevents.*
