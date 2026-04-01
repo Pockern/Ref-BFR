@@ -5,21 +5,35 @@ https://github.com/openai/improved-diffusion/blob/e94489283bb876ac1477d5dd7709bb
 https://github.com/CompVis/taming-transformers
 -- merci
 """
+# This file keeps the vendored Ref-LDM diffusion models runnable without pytorch-lightning.
 from collections import defaultdict
 from typing import Union, Dict
+import sys
 
 import torch
+
+# Mock pytorch_lightning to allow loading checkpoints without the package
+def _mock_pytorch_lightning():
+    """Create mock pytorch_lightning modules to deserialize Lightning checkpoints."""
+    class MockModule:
+        def __getattr__(self, name):
+            return MockModule()
+        def __call__(self, *args, **kwargs):
+            return MockModule()
+
+    if 'pytorch_lightning' not in sys.modules:
+        sys.modules['pytorch_lightning'] = MockModule()
+        sys.modules['pytorch_lightning.callbacks'] = MockModule()
+        sys.modules['pytorch_lightning.callbacks.model_checkpoint'] = MockModule()
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import pytorch_lightning as pl
 from torch.optim.lr_scheduler import LambdaLR
 from einops import rearrange, repeat
 from contextlib import contextmanager
 from functools import partial
 from tqdm import tqdm
 from torchvision.utils import make_grid
-from pytorch_lightning.utilities.distributed import rank_zero_only
 # import pytorch_ssim
 # import lpips
 # from pytorch_memlab import profile, profile_every
@@ -48,7 +62,44 @@ def uniform_on_device(r1, r2, shape, device):
     return (r1 - r2) * torch.rand(*shape, device=device) + r2
 
 
-class DDPM(pl.LightningModule):
+def rank_zero_only(function):
+    """Return the wrapped function unchanged in the non-Lightning runtime."""
+    return function
+
+
+class _RefLDMModule(nn.Module):
+    """Provide the small subset of LightningModule behavior used by current runtime paths."""
+
+    def __init__(self):
+        super().__init__()
+        self.global_step = 0
+        self.current_epoch = 0
+
+    @property
+    def device(self):
+        """Infer the module device from parameters or buffers."""
+        parameter = next(self.parameters(), None)
+        if parameter is not None:
+            return parameter.device
+        buffer = next(self.buffers(), None)
+        if buffer is not None:
+            return buffer.device
+        return torch.device("cpu")
+
+    def log(self, *args, **kwargs):
+        """Ignore Lightning logging calls in the standalone runtime."""
+        return None
+
+    def log_dict(self, *args, **kwargs):
+        """Ignore Lightning logging calls in the standalone runtime."""
+        return None
+
+    def optimizers(self):
+        """Keep the old API surface for methods that are unused in OSEDiff_refldm."""
+        raise RuntimeError("Optimizer access is not available outside the original Lightning trainer.")
+
+
+class DDPM(_RefLDMModule):
     # classic DDPM with Gaussian diffusion, in image space
     def __init__(self,
                  unet_config,
@@ -189,6 +240,7 @@ class DDPM(pl.LightningModule):
                     print(f"{context}: Restored training weights")
 
     def init_from_ckpt(self, path, ignore_keys=list(), only_model=False, ckpt_extra_w_scale=0.):
+        _mock_pytorch_lightning()
         sd = torch.load(path, map_location="cpu")
         if "state_dict" in list(sd.keys()):
             sd = sd["state_dict"]
@@ -198,6 +250,8 @@ class DDPM(pl.LightningModule):
             'model.diffusion_model.input_blocks.0.0.weight',
             'model_ema.diffusion_modelinput_blocks00weight',
         ]:
+            if in_weight_key not in sd:
+                continue
             ckpt_in_weight = sd[in_weight_key]
             ckpt_in_chs = ckpt_in_weight.shape[1]
             new_in_chs = self.model.diffusion_model.in_channels
@@ -219,11 +273,25 @@ class DDPM(pl.LightningModule):
                     del sd[k]
         missing, unexpected = self.load_state_dict(sd, strict=False) if not only_model else self.model.load_state_dict(
             sd, strict=False)
-        print(f"Restored from {path} with {len(missing)} missing and {len(unexpected)} unexpected keys")
+
+        # 严谨检查：计算加载比例
+        target = self if not only_model else self.model
+        model_keys = set(target.state_dict().keys())
+        loaded_keys = set(sd.keys())
+        coverage = len(model_keys & loaded_keys) / len(model_keys) if model_keys else 0
+
+        print(f"Restored from {path}")
+        print(f"  State dict coverage: {coverage:.2%} ({len(model_keys & loaded_keys)}/{len(model_keys)} keys)")
+        print(f"  Missing: {len(missing)}, Unexpected: {len(unexpected)}")
+
         if len(missing) > 0:
-            print(f"Missing Keys: {missing}")
+            print(f"  Missing Keys: {missing[:10]}{'...' if len(missing) > 10 else ''}")
         if len(unexpected) > 0:
-            print(f"Unexpected Keys: {unexpected}")
+            print(f"  Unexpected Keys: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}")
+
+        # 警告覆盖率过低的情况
+        if coverage < 0.5:
+            print(f"WARNING: Low weight coverage ({coverage:.2%}). Checkpoint may not be compatible.")
 
     def q_mean_variance(self, x_start, t):
         """
@@ -1259,7 +1327,7 @@ class LatentDiffusion(DDPM):
         return x
 
 
-class DiffusionWrapper(pl.LightningModule):
+class DiffusionWrapper(_RefLDMModule):
     '''Wrap U-net for self.model in LatentDiffusion
 
     Attributes:

@@ -32,6 +32,7 @@ events.out.tfevents.*
 # Validation image dumps and metric summaries if created outside ignored output roots.
 eval/
 metrics/
+src/
 
 # Checkpoints, exported weights, and large binary artifacts generated during experiments.
 checkpoints/

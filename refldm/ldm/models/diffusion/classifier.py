@@ -1,6 +1,27 @@
 import os
+import sys
 import torch
-import pytorch_lightning as pl
+
+# Mock pytorch_lightning to allow loading checkpoints without the package
+class _MockLightningModule:
+    """Mock LightningModule base class."""
+    pass
+
+class MockPL:
+    LightningModule = _MockLightningModule
+    Callback = object
+
+    def __getattr__(self, name):
+        return MockPL()
+
+# Inject mock before any imports that might need it
+if 'pytorch_lightning' not in sys.modules:
+    sys.modules['pytorch_lightning'] = MockPL()
+    sys.modules['pytorch_lightning.callbacks'] = MockPL()
+    sys.modules['pytorch_lightning.callbacks.model_checkpoint'] = MockPL()
+
+import pytorch_lightning as pl  # Now imports our mock
+
 from omegaconf import OmegaConf
 from torch.nn import functional as F
 from torch.optim import AdamW
@@ -68,6 +89,12 @@ class NoisyLatentImageClassifier(pl.LightningModule):
         self.weight_decay = weight_decay
 
     def init_from_ckpt(self, path, ignore_keys=list(), only_model=False):
+        # Ensure mock is installed (in case classifier.py is imported first)
+        if 'pytorch_lightning' not in sys.modules:
+            sys.modules['pytorch_lightning'] = MockPL()
+            sys.modules['pytorch_lightning.callbacks'] = MockPL()
+            sys.modules['pytorch_lightning.callbacks.model_checkpoint'] = MockPL()
+
         sd = torch.load(path, map_location="cpu")
         if "state_dict" in list(sd.keys()):
             sd = sd["state_dict"]
@@ -79,11 +106,24 @@ class NoisyLatentImageClassifier(pl.LightningModule):
                     del sd[k]
         missing, unexpected = self.load_state_dict(sd, strict=False) if not only_model else self.model.load_state_dict(
             sd, strict=False)
-        print(f"Restored from {path} with {len(missing)} missing and {len(unexpected)} unexpected keys")
+
+        # 严谨检查：计算加载比例
+        target = self if not only_model else self.model
+        model_keys = set(target.state_dict().keys())
+        loaded_keys = set(sd.keys())
+        coverage = len(model_keys & loaded_keys) / len(model_keys) if model_keys else 0
+
+        print(f"Restored from {path}")
+        print(f"  State dict coverage: {coverage:.2%} ({len(model_keys & loaded_keys)}/{len(model_keys)} keys)")
+        print(f"  Missing: {len(missing)}, Unexpected: {len(unexpected)}")
+
         if len(missing) > 0:
-            print(f"Missing Keys: {missing}")
+            print(f"  Missing Keys: {missing[:10]}{'...' if len(missing) > 10 else ''}")
         if len(unexpected) > 0:
-            print(f"Unexpected Keys: {unexpected}")
+            print(f"  Unexpected Keys: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}")
+
+        if coverage < 0.5:
+            print(f"WARNING: Low weight coverage ({coverage:.2%}). Checkpoint may not be compatible.")
 
     def load_diffusion(self):
         model = instantiate_from_config(self.diffusion_config)

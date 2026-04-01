@@ -45,10 +45,10 @@ def _build_refldm_model(config_path, teacher_ckpt_path, vae_ckpt_path, device, t
     model.load_state_dict(state_dict, strict=False)
     model.to(device)
 
-    # The migration baseline keeps the latent space fixed and only trains
-    # the diffusion backbone that predicts the one-step latent update.
-    model.requires_grad_(False)
+    # Keep inference-time parameter flags compatible with the original Ref-LDM EMA flow.
+    # The training wrapper still limits optimization to the diffusion backbone explicitly.
     if trainable:
+        model.requires_grad_(False)
         model.model.diffusion_model.requires_grad_(True)
         model.model.diffusion_model.train()
     else:
@@ -249,11 +249,15 @@ class OSEDiff_test(nn.Module, RefLDMOneStepMixin):
         super().__init__()
         self.args = args
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        checkpoint = torch.load(args.osediff_path, map_location="cpu")
-        config_path = checkpoint.get("teacher_config_path", args.teacher_config_path)
-        teacher_ckpt_path = checkpoint.get("teacher_ckpt_path", args.teacher_ckpt_path)
-        vae_ckpt_path = checkpoint.get("vae_ckpt_path", args.vae_ckpt_path)
-        self.student_timestep = checkpoint.get("student_timestep", args.student_timestep)
+        self.inference_mode = getattr(args, "inference_mode", "one_step")
+        checkpoint_path = getattr(args, "osediff_path", "")
+        checkpoint = None
+        if checkpoint_path and os.path.isfile(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        config_path = checkpoint.get("teacher_config_path", args.teacher_config_path) if checkpoint else args.teacher_config_path
+        teacher_ckpt_path = checkpoint.get("teacher_ckpt_path", args.teacher_ckpt_path) if checkpoint else args.teacher_ckpt_path
+        vae_ckpt_path = checkpoint.get("vae_ckpt_path", args.vae_ckpt_path) if checkpoint else args.vae_ckpt_path
+        self.student_timestep = checkpoint.get("student_timestep", args.student_timestep) if checkpoint else args.student_timestep
         self.student_model = _build_refldm_model(
             config_path=config_path,
             teacher_ckpt_path=teacher_ckpt_path,
@@ -261,12 +265,54 @@ class OSEDiff_test(nn.Module, RefLDMOneStepMixin):
             device=self.device,
             trainable=False,
         )
-        self.student_model.load_state_dict(checkpoint["state_dict"], strict=False)
+        if checkpoint and "state_dict" in checkpoint:
+            self.student_model.load_state_dict(checkpoint["state_dict"], strict=False)
         self.student_model.eval()
+        self.ddim_sampler = DDIMSampler(
+            self.student_model,
+            print_tqdm=getattr(args, "print_teacher_progress", False),
+            schedule=getattr(args, "ddim_schedule", "uniform_trailing"),
+        )
+
+    @torch.no_grad()
+    def _run_ddim_multi_step(self, lq, ref):
+        """Run the original Ref-LDM multi-step DDIM inference through the generator model."""
+        cond = self.student_model.get_learned_conditioning(
+            {
+                "lq_image": lq.to(self.device),
+                "ref_image": ref.to(self.device),
+            }
+        )
+        uc = None
+        cfg_scale = getattr(self.args, "cfg_scale", 1.0)
+        if cfg_scale != 1.0:
+            uc = _clone_uncond_condition(cond)
+
+        latent_shape = self._latent_shape_from_model(self.student_model)
+        seed = getattr(self.args, "seed", 2024)
+        generator = torch.Generator(device=self.device).manual_seed(seed)
+        x_t = torch.randn((lq.shape[0], *latent_shape), generator=generator, device=self.device)
+        context = self.student_model.ema_scope() if getattr(self.student_model, "use_ema", False) else nullcontext()
+        with context:
+            latent_pred, _ = self.ddim_sampler.sample(
+                S=getattr(self.args, "ddim_step", 50),
+                unconditional_guidance_scale=cfg_scale,
+                conditioning=cond,
+                unconditional_conditioning=uc,
+                shape=latent_shape,
+                x_T=x_t,
+                batch_size=lq.shape[0],
+                verbose=False,
+            )
+        return self.student_model.decode_first_stage(latent_pred)
 
     @torch.no_grad()
     def forward(self, lq, ref):
-        """Run one-step Ref-LDM inference with explicit LQ and reference tensors."""
+        """Run generator-only Ref-LDM inference with either one-step or multi-step DDIM."""
+        if self.inference_mode == "ddim_multi_step":
+            return self._run_ddim_multi_step(lq, ref)
+        if self.inference_mode != "one_step":
+            raise ValueError(f"Unsupported inference_mode: {self.inference_mode}")
         cond = self.student_model.get_learned_conditioning(
             {
                 "lq_image": lq.to(self.device),

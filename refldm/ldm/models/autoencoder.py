@@ -1,7 +1,25 @@
+# This file keeps the vendored Ref-LDM autoencoders runnable without pytorch-lightning.
+
+import sys
 import torch
-import pytorch_lightning as pl
+import torch.nn as nn
 import torch.nn.functional as F
 from contextlib import contextmanager
+
+# Mock pytorch_lightning to allow loading checkpoints without the package
+def _mock_pytorch_lightning():
+    """Create mock pytorch_lightning modules to deserialize Lightning checkpoints."""
+    class MockModule:
+        def __getattr__(self, name):
+            return MockModule()
+        def __call__(self, *args, **kwargs):
+            return MockModule()
+
+    if 'pytorch_lightning' not in sys.modules:
+        sys.modules['pytorch_lightning'] = MockModule()
+        sys.modules['pytorch_lightning.callbacks'] = MockModule()
+        sys.modules['pytorch_lightning.callbacks.model_checkpoint'] = MockModule()
+
 
 from taming.modules.vqvae.quantize import VectorQuantizer2 as VectorQuantizer
 
@@ -11,7 +29,35 @@ from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
 from ldm.util import instantiate_from_config
 
 
-class VQModel(pl.LightningModule):
+class _RefLDMModule(nn.Module):
+    """Provide the small subset of LightningModule behavior used by the current runtime."""
+
+    def __init__(self):
+        super().__init__()
+        self.global_step = 0
+        self.current_epoch = 0
+
+    @property
+    def device(self):
+        """Infer the module device from parameters or buffers."""
+        parameter = next(self.parameters(), None)
+        if parameter is not None:
+            return parameter.device
+        buffer = next(self.buffers(), None)
+        if buffer is not None:
+            return buffer.device
+        return torch.device("cpu")
+
+    def log(self, *args, **kwargs):
+        """Ignore Lightning logging calls in the standalone runtime."""
+        return None
+
+    def log_dict(self, *args, **kwargs):
+        """Ignore Lightning logging calls in the standalone runtime."""
+        return None
+
+
+class VQModel(_RefLDMModule):
     def __init__(self,
                  ddconfig,
                  lossconfig,
@@ -76,7 +122,11 @@ class VQModel(pl.LightningModule):
                     print(f"{context}: Restored training weights")
 
     def init_from_ckpt(self, path, ignore_keys=list()):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        _mock_pytorch_lightning()
+        checkpoint = torch.load(path, map_location="cpu")
+        sd = checkpoint.get("state_dict", checkpoint)
+        if not isinstance(sd, dict):
+            raise ValueError(f"Checkpoint at {path} does not contain a valid state_dict")
         keys = list(sd.keys())
         for k in keys:
             for ik in ignore_keys:
@@ -84,10 +134,24 @@ class VQModel(pl.LightningModule):
                     print("Deleting key {} from state_dict.".format(k))
                     del sd[k]
         missing, unexpected = self.load_state_dict(sd, strict=False)
-        print(f"Restored from {path} with {len(missing)} missing and {len(unexpected)} unexpected keys")
+
+        # 严谨检查：计算加载比例
+        model_keys = set(self.state_dict().keys())
+        loaded_keys = set(sd.keys())
+        coverage = len(model_keys & loaded_keys) / len(model_keys) if model_keys else 0
+
+        print(f"Restored from {path}")
+        print(f"  State dict coverage: {coverage:.2%} ({len(model_keys & loaded_keys)}/{len(model_keys)} keys)")
+        print(f"  Missing: {len(missing)}, Unexpected: {len(unexpected)}")
+
         if len(missing) > 0:
-            print(f"Missing Keys: {missing}")
-            print(f"Unexpected Keys: {unexpected}")
+            print(f"  Missing Keys: {missing[:10]}{'...' if len(missing) > 10 else ''}")
+        if len(unexpected) > 0:
+            print(f"  Unexpected Keys: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}")
+
+        # 警告覆盖率过低的情况
+        if coverage < 0.5:
+            print(f"WARNING: Low weight coverage ({coverage:.2%}). Checkpoint may not be compatible.")
 
     def on_train_batch_end(self, *args, **kwargs):
         if self.use_ema:
@@ -188,8 +252,7 @@ class VQModel(pl.LightningModule):
                    prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
         self.log(f"val{suffix}/aeloss", aeloss,
                    prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-        if version.parse(pl.__version__) >= version.parse('1.4.0'):
-            del log_dict_ae[f"val{suffix}/rec_loss"]
+        del log_dict_ae[f"val{suffix}/rec_loss"]
         self.log_dict(log_dict_ae)
         self.log_dict(log_dict_disc)
         return self.log_dict
@@ -282,7 +345,7 @@ class VQModelInterface(VQModel):
         return dec
 
 
-class AutoencoderKL(pl.LightningModule):
+class AutoencoderKL(_RefLDMModule):
     def __init__(self,
                  ddconfig,
                  lossconfig,
@@ -311,15 +374,36 @@ class AutoencoderKL(pl.LightningModule):
             self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys)
 
     def init_from_ckpt(self, path, ignore_keys=list()):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        _mock_pytorch_lightning()
+        checkpoint = torch.load(path, map_location="cpu")
+        sd = checkpoint.get("state_dict", checkpoint)
+        if not isinstance(sd, dict):
+            raise ValueError(f"Checkpoint at {path} does not contain a valid state_dict")
         keys = list(sd.keys())
         for k in keys:
             for ik in ignore_keys:
                 if k.startswith(ik):
                     print("Deleting key {} from state_dict.".format(k))
                     del sd[k]
-        self.load_state_dict(sd, strict=False)
+        missing, unexpected = self.load_state_dict(sd, strict=False)
+
+        # 严谨检查：计算加载比例
+        model_keys = set(self.state_dict().keys())
+        loaded_keys = set(sd.keys())
+        coverage = len(model_keys & loaded_keys) / len(model_keys) if model_keys else 0
+
         print(f"Restored from {path}")
+        print(f"  State dict coverage: {coverage:.2%} ({len(model_keys & loaded_keys)}/{len(model_keys)} keys)")
+        print(f"  Missing: {len(missing)}, Unexpected: {len(unexpected)}")
+
+        if len(missing) > 0:
+            print(f"  Missing Keys: {missing[:10]}{'...' if len(missing) > 10 else ''}")
+        if len(unexpected) > 0:
+            print(f"  Unexpected Keys: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}")
+
+        # 警告覆盖率过低的情况
+        if coverage < 0.5:
+            print(f"WARNING: Low weight coverage ({coverage:.2%}). Checkpoint may not be compatible.")
 
     def encode(self, x):
         h = self.encoder(x)

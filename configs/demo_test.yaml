@@ -1,3 +1,5 @@
+# This config keeps the original single-image demo inference setup for OSEDiff_refldm.
+
 output_dir: outputs
 output_name: result.png
 input_mode: single # single or dataset_csv
@@ -8,8 +10,8 @@ vae_ckpt_path: /mnt/data/shenglong/project/checkpoints/vqgan.ckpt
 osediff_path: ""
 inference_mode: ddim_multi_step # one_step or ddim_multi_step
 student_timestep: 999
-ddim_step: 50
-ddim_schedule: uniform_trailing
+ddim_step: 100
+ddim_schedule: uniform
 cfg_scale: 1.5
 seed: 2024
 
